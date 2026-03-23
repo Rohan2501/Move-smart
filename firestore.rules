@@ -1,0 +1,169 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    //
+    // Collection: users
+    // Document ID: {userId}
+    // Fields:
+    //   - uid: string (required) - Firebase Auth UID
+    //   - name: string (required, < 50 chars) - User's full name
+    //   - email: string (required, valid email) - User's email address
+    //   - role: string (required, 'partner' or 'admin') - User role
+    //   - status: string (required, 'online', 'offline', 'busy') - Partner's current status
+    //   - vehicleType: string (optional, 'bicycle', 'motorcycle', 'car') - Type of vehicle used
+    //   - createdAt: timestamp (required) - Timestamp of account creation
+    //
+    // Collection: deliveries
+    // Document ID: {deliveryId}
+    // Fields:
+    //   - id: string (required) - Unique delivery ID
+    //   - restaurantName: string (required, < 100 chars) - Name of the restaurant
+    //   - restaurantAddress: string (required, < 200 chars) - Pickup address
+    //   - customerName: string (required, < 50 chars) - Name of the customer
+    //   - customerAddress: string (required, < 200 chars) - Dropoff address
+    //   - status: string (required, 'pending', 'accepted', 'picked_up', 'delivered', 'cancelled') - Current status of the delivery
+    //   - partnerId: string (optional) - UID of the partner who accepted the delivery
+    //   - fee: number (required, > 0) - Delivery fee in dollars
+    //   - distance: number (optional, > 0) - Estimated distance in miles
+    //   - createdAt: timestamp (required) - Timestamp of delivery creation
+    //   - updatedAt: timestamp (required) - Timestamp of last update
+    //
+    // ===============================================================
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() &&
+        (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' ||
+          (request.auth.token.email == "rohanlatha.25@gmail.com" && request.auth.token.email_verified == true));
+    }
+
+    function hasOnlyAllowedFields(allowedFields) {
+      return request.resource.data.keys().hasOnly(allowedFields);
+    }
+
+    function hasRequiredFields(requiredFields) {
+      return request.resource.data.keys().hasAll(requiredFields);
+    }
+
+    function isValidEmail(email) {
+      return email is string && email.matches("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$");
+    }
+
+    function validStringLength(field, minLen, maxLen) {
+      return request.resource.data[field] is string &&
+        request.resource.data[field].size() >= minLen &&
+        request.resource.data[field].size() <= maxLen;
+    }
+
+    // ===============================================================
+    // Domain Validators
+    // ===============================================================
+
+    function isValidUser() {
+      let data = request.resource.data;
+      let allowedFields = ['uid', 'name', 'email', 'role', 'status', 'vehicleType', 'createdAt'];
+      let requiredFields = ['uid', 'name', 'email', 'role', 'status', 'createdAt'];
+      
+      return hasOnlyAllowedFields(allowedFields) &&
+             hasRequiredFields(requiredFields) &&
+             data.uid == request.auth.uid &&
+             validStringLength('name', 1, 50) &&
+             isValidEmail(data.email) &&
+             data.role in ['partner', 'admin'] &&
+             data.status in ['online', 'offline', 'busy'] &&
+             (!('vehicleType' in data) || data.vehicleType in ['bicycle', 'motorcycle', 'car']) &&
+             data.createdAt is timestamp;
+    }
+
+    function isValidDelivery() {
+      let data = request.resource.data;
+      let allowedFields = ['id', 'restaurantName', 'restaurantAddress', 'customerName', 'customerAddress', 'status', 'partnerId', 'fee', 'distance', 'createdAt', 'updatedAt'];
+      let requiredFields = ['id', 'restaurantName', 'restaurantAddress', 'customerName', 'customerAddress', 'status', 'fee', 'createdAt', 'updatedAt'];
+      
+      return hasOnlyAllowedFields(allowedFields) &&
+             hasRequiredFields(requiredFields) &&
+             validStringLength('id', 1, 50) &&
+             validStringLength('restaurantName', 1, 100) &&
+             validStringLength('restaurantAddress', 1, 200) &&
+             validStringLength('customerName', 1, 50) &&
+             validStringLength('customerAddress', 1, 200) &&
+             data.status in ['pending', 'accepted', 'picked_up', 'delivered', 'cancelled'] &&
+             (!('partnerId' in data) || (data.partnerId is string && data.partnerId.size() > 0)) &&
+             data.fee is number && data.fee > 0 &&
+             (!('distance' in data) || (data.distance is number && data.distance > 0)) &&
+             data.createdAt is timestamp &&
+             data.updatedAt is timestamp;
+    }
+
+    // ===============================================================
+    // Rules
+    // ===============================================================
+
+    match /users/{userId} {
+      allow read: if isOwner(userId) || isAdmin();
+      
+      allow create: if isOwner(userId) && isValidUser() && 
+        // Only admins can create admin users, otherwise role must be 'partner'
+        (request.resource.data.role == 'partner' || isAdmin());
+        
+      allow update: if isOwner(userId) && isValidUser() &&
+        // Cannot change uid or createdAt
+        request.resource.data.uid == resource.data.uid &&
+        request.resource.data.createdAt == resource.data.createdAt &&
+        // Cannot escalate privileges
+        (request.resource.data.role == resource.data.role || isAdmin());
+        
+      allow delete: if isAdmin();
+    }
+
+    match /deliveries/{deliveryId} {
+      // Any authenticated partner can read deliveries to see available ones
+      allow read: if isAuthenticated();
+      
+      // Any authenticated user can create deliveries for testing
+      allow create: if isAuthenticated() && isValidDelivery();
+      
+      // Partners can update deliveries (accept, pickup, deliver)
+      allow update: if isAuthenticated() && isValidDelivery() &&
+        // Cannot change core details
+        request.resource.data.id == resource.data.id &&
+        request.resource.data.restaurantName == resource.data.restaurantName &&
+        request.resource.data.restaurantAddress == resource.data.restaurantAddress &&
+        request.resource.data.customerName == resource.data.customerName &&
+        request.resource.data.customerAddress == resource.data.customerAddress &&
+        request.resource.data.fee == resource.data.fee &&
+        request.resource.data.createdAt == resource.data.createdAt &&
+        // State transitions
+        (
+          // Admin can do anything
+          isAdmin() ||
+          // Partner accepting a pending delivery
+          (resource.data.status == 'pending' && request.resource.data.status == 'accepted' && request.resource.data.partnerId == request.auth.uid) ||
+          // Partner updating their own active delivery
+          (resource.data.partnerId == request.auth.uid && request.resource.data.partnerId == request.auth.uid && 
+           (
+             (resource.data.status == 'accepted' && request.resource.data.status == 'picked_up') ||
+             (resource.data.status == 'picked_up' && request.resource.data.status == 'delivered')
+           )
+          )
+        );
+        
+      allow delete: if isAdmin();
+    }
+  }
+}

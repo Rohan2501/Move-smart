@@ -1,0 +1,48 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "A delivery partner user profile",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "description": "Firebase Auth UID" },
+        "name": { "type": "string", "description": "User's full name" },
+        "email": { "type": "string", "description": "User's email address" },
+        "role": { "type": "string", "enum": ["partner", "admin"], "description": "User role" },
+        "status": { "type": "string", "enum": ["online", "offline", "busy"], "description": "Partner's current status" },
+        "vehicleType": { "type": "string", "enum": ["bicycle", "motorcycle", "car"], "description": "Type of vehicle used" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Timestamp of account creation" }
+      },
+      "required": ["uid", "name", "email", "role", "status", "createdAt"]
+    },
+    "Delivery": {
+      "title": "Delivery",
+      "description": "A delivery task",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique delivery ID" },
+        "restaurantName": { "type": "string", "description": "Name of the restaurant" },
+        "restaurantAddress": { "type": "string", "description": "Pickup address" },
+        "customerName": { "type": "string", "description": "Name of the customer" },
+        "customerAddress": { "type": "string", "description": "Dropoff address" },
+        "status": { "type": "string", "enum": ["pending", "accepted", "picked_up", "delivered", "cancelled"], "description": "Current status of the delivery" },
+        "partnerId": { "type": "string", "description": "UID of the partner who accepted the delivery", "$ref": "#/entities/User" },
+        "fee": { "type": "number", "description": "Delivery fee in dollars" },
+        "distance": { "type": "number", "description": "Estimated distance in miles" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Timestamp of delivery creation" },
+        "updatedAt": { "type": "string", "format": "date-time", "description": "Timestamp of last update" }
+      },
+      "required": ["id", "restaurantName", "restaurantAddress", "customerName", "customerAddress", "status", "fee", "createdAt", "updatedAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/User" },
+      "description": "Stores user profiles for delivery partners"
+    },
+    "/deliveries/{deliveryId}": {
+      "schema": { "$ref": "#/entities/Delivery" },
+      "description": "Stores delivery tasks"
+    }
+  }
+}

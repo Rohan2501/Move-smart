@@ -1,0 +1,5 @@
+{
+  "name": "MOVE SMART",
+  "description": "A logistics and transportation platform replica of Porter, featuring vehicle booking, pricing estimation, and user authentication.",
+  "requestFramePermissions": ["geolocation"]
+}
